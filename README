@@ -1,0 +1,28 @@
+EVP_PKEY *key = NULL;
+EVP_PKEY_CTX *pctx = NULL;
+
+pctx = EVP_PKEY_CTX_new_id(EVP_PKEY_X25519, NULL);
+EVP_PKEY_keygen_init(pctx);
+EVP_PKEY_keygen(pctx, &key);
+
+https://wiki.openssl.org/index.php/EVP_Signing_and_Verifying
+
+EVP_MD_CTX *EVP_MD_CTX_new(void);
+int EVP_DigestSignInit(EVP_MD_CTX *ctx, EVP_PKEY_CTX **pctx,
+                       const EVP_MD *type, ENGINE *e, EVP_PKEY *pkey);
+int EVP_DigestSignUpdate(EVP_MD_CTX *ctx, const void *d, size_t cnt);
+int EVP_DigestSignFinal(EVP_MD_CTX *ctx, unsigned char *sig, size_t *siglen);
+int EVP_DigestSign(EVP_MD_CTX *ctx, unsigned char *sigret,
+                   size_t *siglen, const unsigned char *tbs,
+                   size_t tbslen);
+
+
+int EVP_DigestVerifyInit(EVP_MD_CTX *ctx, EVP_PKEY_CTX **pctx,
+                         const EVP_MD *type, ENGINE *e, EVP_PKEY *pkey);
+int EVP_DigestVerifyUpdate(EVP_MD_CTX *ctx, const void *d, size_t cnt);
+int EVP_DigestVerifyFinal(EVP_MD_CTX *ctx, const unsigned char *sig,
+                          size_t siglen);
+int EVP_DigestVerify(EVP_MD_CTX *ctx, const unsigned char *sigret,
+                     size_t siglen, const unsigned char *tbs, size_t tbslen);
+
+
