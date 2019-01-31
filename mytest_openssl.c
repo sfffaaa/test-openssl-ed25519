@@ -1,7 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <string.h>
 #include <openssl/evp.h>
+#include <openssl/pem.h>
 #include "mytest/cpucycles.h"
 #include "mytest/speed.h"
 
@@ -23,25 +25,38 @@
 
 unsigned long long timing_overhead;
 
+void printMyStr(unsigned char* bin, size_t len, const char* prefix)
+{
+	char *out;
+	out = (char*)malloc(len*2+1);
+	for (size_t i=0; i<len; i++) {
+		out[i*2]   = "0123456789ABCDEF"[bin[i] >> 4];
+		out[i*2+1] = "0123456789ABCDEF"[bin[i] & 0x0F];
+	}
+	out[len*2] = '\0';
+	printf("%s(%lu): %s\n", prefix, len, out);
+	free(out);
+}
+
 int Ed25519PkSkGenerate(EVP_PKEY** ppKey)
 {
     EVP_PKEY_CTX *pCtx = NULL;
     int ret = -1;
     if (NULL == ppKey || *ppKey) {
-        printf("Input variable fail");
+        printf("Input variable fail\n");
         return ret;
     }
     do {
         if (NULL == (pCtx = (EVP_PKEY_CTX_new_id(EVP_PKEY_ED25519, NULL)))) {
-            printf("New Key fail...");
+            printf("New Key fail...\n");
             break;
         }
-        if (0 != EVP_PKEY_keygen_init(pCtx)) {
-            printf("EVP_PKEY_keygen_init fail");
+        if (1 != EVP_PKEY_keygen_init(pCtx)) {
+            printf("EVP_PKEY_keygen_init fail\n");
             break;
         }
-        if (0 != EVP_PKEY_keygen(pCtx, ppKey)) {
-            printf("EVP_PKEY_kengen fail");
+        if (1 != EVP_PKEY_keygen(pCtx, ppKey)) {
+            printf("EVP_PKEY_kengen fail\n");
             break;
         }
 
@@ -55,29 +70,104 @@ int Ed25519PkSkGenerate(EVP_PKEY** ppKey)
     return ret;
 }
 
-int Ed25519Sign(char** ppCt, size_t* pCtLen,
-                const char* pM, const size_t MLen,
+int PrintPKSK(EVP_PKEY* pKey)
+{
+	unsigned char sk[1024], pk[1024];
+	size_t skLen, pkLen;
+	EVP_PKEY_get_raw_private_key(pKey, sk, &skLen);
+   	EVP_PKEY_get_raw_public_key(pKey, pk, &pkLen);
+
+	printMyStr(sk, skLen, "sk");
+	printMyStr(pk, pkLen, "pk");
+ return 0;
+}
+
+int Ed25519Sign(unsigned char** ppCt, size_t* pCtLen,
+                const unsigned char* pM, size_t mLen,
                 EVP_PKEY* pKey)
 {
     int ret = -1;
-    if (NULL == ppCt || *ppCt ||
-        NULL == pCtLen ||
-        NULL == pM ||
-        0 == MLen ||
+    if (NULL == ppCt || *ppCt || NULL == pCtLen ||
+        NULL == pM || 0 == mLen ||
         NULL == pKey) {
-        printf("Input variable fail");
+        printf("Input variable fail\n");
+        return ret;
+    }
+
+    EVP_MD_CTX *pMDCtx = NULL;
+    unsigned char* pTmpM = NULL;
+    do {
+        if (NULL == (pMDCtx = EVP_MD_CTX_new())) {
+            printf("EVP_MD_CTX_new fail\n");
+            break;
+        }
+
+        if (1 != EVP_DigestSignInit(pMDCtx, NULL, NULL, NULL, pKey)) {
+            printf("EVP_DigestSignInit fail\n");
+            break;
+        }
+
+        size_t tmpMLen = 0;
+        if (1 != EVP_DigestSign(pMDCtx, NULL, &tmpMLen, pM, mLen)) {
+            printf("EVP_DigestSign fail\n");
+            break;
+        }
+
+        if (NULL == (pTmpM = (unsigned char*)calloc(tmpMLen, sizeof(char)))) {
+            printf("calloc fail\n");
+            break;
+        }
+        if (1 != EVP_DigestSign(pMDCtx, pTmpM, &tmpMLen, pM, mLen)) {
+            printf("EVP_DigestSign fail\n");
+            break;
+        }
+        *ppCt = pTmpM;
+        *pCtLen = tmpMLen;
+
+        ret = 0;
+    } while (0);
+
+    if (pMDCtx) {
+        EVP_MD_CTX_free(pMDCtx);
+    }
+
+    if (0 == ret) {
+        return ret;
+    }
+
+    //Error handling
+    if (pTmpM) {
+        free(pTmpM);
+    }
+    return ret;
+}
+
+int Ed25519Verify(const unsigned char* pCt, size_t ctLen,
+                  const unsigned char* pM, size_t mLen,
+                  EVP_PKEY* pKey)
+{
+    int ret = -1;
+    if (NULL == pCt || 0 == ctLen ||
+        NULL == pM || 0 == mLen ||
+        NULL == pKey) {
+        printf("Input variable fail\n");
         return ret;
     }
 
     EVP_MD_CTX *pMDCtx = NULL;
     do {
         if (NULL == (pMDCtx = EVP_MD_CTX_new())) {
-            printf("EVP_MD_CTX_new fail");
+            printf("EVP_MD_CTX_new fail\n");
             break;
         }
 
-        if (0 != EVP_DigestSignInit(pMDCtx, NULL, NULL, NULL, pKey)) {
-            printf("EVP_DigestSignInit fail");
+        if (1 != EVP_DigestVerifyInit(pMDCtx, NULL, NULL, NULL, pKey)) {
+            printf("EVP_DigestVerrifyInit fail\n");
+            break;
+        }
+
+        if (1 != EVP_DigestVerify(pMDCtx, pCt, ctLen, pM, mLen)) {
+            printf("EVP_DigestSign fail\n");
             break;
         }
 
@@ -87,71 +177,88 @@ int Ed25519Sign(char** ppCt, size_t* pCtLen,
     if (pMDCtx) {
         EVP_MD_CTX_free(pMDCtx);
     }
+
     return ret;
 }
 
+
 int main(void)
 {
-    unsigned int i;
-    const unsigned long long mlen = strlen(TEST_JSON_PLAINTEXT) + 1;
-    unsigned char* m;
-//    unsigned char* m_;
+    unsigned int i = 0;
+    const size_t mLen = strlen(TEST_JSON_PLAINTEXT) + 1;
+    unsigned char* m = NULL;
+
+    bool status = true;
     unsigned long long tkeygen[NTESTS], tsign[NTESTS], tverify[NTESTS];
     unsigned long long totalLength = 0;
 
-    if (NULL == (m = (unsigned char*)calloc(mlen, sizeof(char)))) {
-        printf("Cannot calloc data");
+    if (NULL == (m = (unsigned char*)calloc(mLen, sizeof(char)))) {
+        printf("Cannot calloc data\n");
         return -1;
     }
-    snprintf((char*)m, mlen, TEST_JSON_PLAINTEXT);
+    snprintf((char*)m, mLen, TEST_JSON_PLAINTEXT);
 
-    printf("Original String:\n%s\nlength: %llu\n", (char*)m, mlen);
+    printf("Original String:\n%s\nlength: %lu\n", (char*)m, mLen);
     printf("\n");
     timing_overhead = cpucycles_overhead();
 
     for (i = 0; i < NTESTS; ++i) {
         EVP_PKEY* pKey = NULL;
         int ret = -1;
+        unsigned char* pCt = NULL;
+        size_t ctLen = 0;
         do {
             // start to prepare to generate keypair
             tkeygen[i] = cpucycles_start();
             if (0 != Ed25519PkSkGenerate(&pKey)) {
-                printf("Ed25519PkSkGenerate fail");
+                printf("Ed25519PkSkGenerate fail\n");
                 break;
             }
             tkeygen[i] = cpucycles_stop() - tkeygen[i] - timing_overhead;
-
             // start to encrypt
             tsign[i] = cpucycles_start();
+            if (0 != Ed25519Sign(&pCt, &ctLen,
+                                 m, mLen,
+                                 pKey)) {
+                printf("Ed25519Sign fail\n");
+                break;
+            }
             tsign[i] = cpucycles_stop() - tsign[i] - timing_overhead;
-
-            // start to decrpt
+             // start to decrpt
             tverify[i] = cpucycles_start();
+            if (0 != Ed25519Verify(pCt, ctLen, m, mLen, pKey)) {
+                printf("Ed25519Verify fail\n");
+                break;
+            }
             tverify[i] = cpucycles_stop() - tverify[i] - timing_overhead;
 
-            if(ret) {
-                printf("Verification failed\n");
-                return -1;
-            }
+            totalLength += ctLen;
+//          PrintPKSK(pKey);
+//			printMyStr(m, mLen, "msg");
+//   		printMyStr(pCt, ctLen, "sig");
 
-            if(mlen != (strlen((char*)m) + 1)) {
-                printf("Message lengths don't match\n");
-                return -1;
-            }
-/*             for(j = 0; j < mlen; ++j) { */
-                /* if(m[j] != m2[j]) { */
-                    /* printf("Messages don't match\n"); */
-                    /* return -1; */
-                /* } */
-            /* } */
+            ret = 0;
         } while (0);
 
+        if (pCt) {
+            free(pCt);
+            pCt = NULL;
+        }
+        if (0 != ret) {
+            printf("Failllllllll\n");
+            status = false;
+            break;
+        }
     }
 
-    print_results("keygen:", tkeygen, NTESTS);
-    print_results("sign: ", tsign, NTESTS);
-    print_results("verify: ", tverify, NTESTS);
-    printf("average length: %llu\n", (totalLength / NTESTS));
+    if (status == false) {
+        printf("This test is fail, please check it\n");
+    } else {
+        print_results("keygen:", tkeygen, NTESTS);
+        print_results("sign: ", tsign, NTESTS);
+        print_results("verify: ", tverify, NTESTS);
+        printf("average length: %llu\n", (totalLength / NTESTS));
+    }
 
 
     return 0;
