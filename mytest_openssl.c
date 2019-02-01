@@ -4,6 +4,7 @@
 #include <string.h>
 #include <openssl/evp.h>
 #include <openssl/pem.h>
+#include <openssl/err.h>
 #include "mytest/cpucycles.h"
 #include "mytest/speed.h"
 
@@ -27,15 +28,15 @@ unsigned long long timing_overhead;
 
 void printMyStr(unsigned char* bin, size_t len, const char* prefix)
 {
-	char *out;
-	out = (char*)malloc(len*2+1);
-	for (size_t i=0; i<len; i++) {
-		out[i*2]   = "0123456789ABCDEF"[bin[i] >> 4];
-		out[i*2+1] = "0123456789ABCDEF"[bin[i] & 0x0F];
-	}
-	out[len*2] = '\0';
-	printf("%s(%lu): %s\n", prefix, len, out);
-	free(out);
+    char *out;
+    out = (char*)malloc(len*2+1);
+    for (size_t i=0; i<len; i++) {
+        out[i*2]   = "0123456789ABCDEF"[bin[i] >> 4];
+        out[i*2+1] = "0123456789ABCDEF"[bin[i] & 0x0F];
+    }
+    out[len*2] = '\0';
+    printf("%s(%lu): %s\n", prefix, len, out);
+    free(out);
 }
 
 int Ed25519PkSkGenerate(EVP_PKEY** ppKey)
@@ -72,13 +73,27 @@ int Ed25519PkSkGenerate(EVP_PKEY** ppKey)
 
 int PrintPKSK(EVP_PKEY* pKey)
 {
-	unsigned char sk[1024], pk[1024];
-	size_t skLen, pkLen;
-	EVP_PKEY_get_raw_private_key(pKey, sk, &skLen);
-   	EVP_PKEY_get_raw_public_key(pKey, pk, &pkLen);
+    unsigned char sk[1024], pk[1024];
+    size_t skLen, pkLen;
 
-	printMyStr(sk, skLen, "sk");
-	printMyStr(pk, pkLen, "pk");
+    if (1 != EVP_PKEY_get_raw_private_key(pKey, sk, &skLen)) {
+        printf("EVP_PKEY_get_raw_private_key fail");
+        char* errStr;
+        int line;
+        unsigned long err = ERR_get_error_line((const char**)&errStr, &line);
+        printf("show me the error: %lu, %s:%i\n", err, errStr, line);
+    }
+
+    if (1 != EVP_PKEY_get_raw_public_key(pKey, pk, &pkLen)) {
+        printf("EVP_PKEY_get_raw_public_key fail");
+        char* errStr;
+        int line;
+        unsigned long err = ERR_get_error_line((const char**)&errStr, &line);
+        printf("show me the error: %lu, %s:%i\n", err, errStr, line);
+    }
+
+    printMyStr(sk, skLen, "sk");
+    printMyStr(pk, pkLen, "pk");
  return 0;
 }
 
@@ -215,6 +230,7 @@ int main(void)
                 break;
             }
             tkeygen[i] = cpucycles_stop() - tkeygen[i] - timing_overhead;
+            PrintPKSK(pKey);
             // start to encrypt
             tsign[i] = cpucycles_start();
             if (0 != Ed25519Sign(&pCt, &ctLen,
@@ -224,7 +240,7 @@ int main(void)
                 break;
             }
             tsign[i] = cpucycles_stop() - tsign[i] - timing_overhead;
-             // start to decrpt
+            // start to decrpt
             tverify[i] = cpucycles_start();
             if (0 != Ed25519Verify(pCt, ctLen, m, mLen, pKey)) {
                 printf("Ed25519Verify fail\n");
@@ -233,13 +249,16 @@ int main(void)
             tverify[i] = cpucycles_stop() - tverify[i] - timing_overhead;
 
             totalLength += ctLen;
-//          PrintPKSK(pKey);
-//			printMyStr(m, mLen, "msg");
-//   		printMyStr(pCt, ctLen, "sig");
+//            printMyStr(m, mLen, "msg");
+//           printMyStr(pCt, ctLen, "sig");
 
             ret = 0;
         } while (0);
 
+        if (pKey) {
+            EVP_PKEY_free(pKey);
+            pKey = NULL;
+        }
         if (pCt) {
             free(pCt);
             pCt = NULL;
